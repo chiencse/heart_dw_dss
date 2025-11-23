@@ -8,4 +8,4 @@ kagglehub
 scikit-learn
 sqlalchemy
 dotenv
-psycopg2
+psycopg2-binary

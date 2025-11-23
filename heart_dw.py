@@ -23,7 +23,8 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-connect_string = os.getenv('POSTGRES_CONNECTION_STRING')
+postgres_string = st.secrets["POSTGRES_CONNECTION_STRING"]
+connect_string = os.getenv('POSTGRES_CONNECTION_STRING', postgres_string)
 path_to_dataset_folder = kagglehub.dataset_download('redwankarimsony/heart-disease-data')
 
 print("Dataset folder path:", path_to_dataset_folder)

@@ -8,3 +8,4 @@ kagglehub
 scikit-learn
 sqlalchemy
 dotenv
+psycopg2

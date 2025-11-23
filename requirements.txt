@@ -1,0 +1,10 @@
+seaborn
+streamlit
+pandas
+numpy
+matplotlib
+plotly
+kagglehub
+scikit-learn
+sqlalchemy
+dotenv

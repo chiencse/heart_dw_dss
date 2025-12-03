@@ -36,7 +36,7 @@ st.title("Heart Disease Prediction - Data Mining & Decision Support System")
 st.markdown("""
 **Môn học**: Data Warehouse & Decision Support Systems  
 **Mục tiêu**: Xây dựng hệ thống hỗ trợ quyết định (DSS) dự đoán bệnh tim dựa trên dữ liệu UCI Heart Disease  
-**Tác giả**: [Tên sinh viên của bạn]
+**Tác giả**: [Nông Minh Chiến - Nguyễn Hữu Thắng]
 """)
 @st.cache_resource
 def get_connection():

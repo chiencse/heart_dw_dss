@@ -342,7 +342,7 @@ dw_menu = st.sidebar.selectbox("Chọn chức năng DW", [
     "Xem Star Schema",
     "Thực hiện ETL vào DW",
     "OLAP - Phân tích đa chiều",
-    "Truy vấn DW cho DSS"
+    "Truy vấn DW cho DSS - Data mart"
 ])
 
 # ------------------ XEM STAR SCHEMA ------------------
@@ -852,7 +852,7 @@ elif dw_menu == "OLAP - Phân tích đa chiều":
              
 
 # ------------------ TRUY VẤN DW CHO DSS ------------------
-elif dw_menu == "Truy vấn DW cho DSS":
+elif dw_menu == "Truy vấn DW cho DSS - Data mart":
     st.subheader("Truy vấn Data Warehouse hỗ trợ ra quyết định lâm sàng")
     st.markdown("""
     **Decision Support System (DSS)**: Các truy vấn hỗ trợ bác sĩ đưa ra quyết định chẩn đoán và điều trị
@@ -1059,4 +1059,321 @@ elif dw_menu == "Truy vấn DW cho DSS":
             st.error(f"Lỗi query: {e}")
         
         st.success("✅ Các truy vấn DSS này có thể tích hợp trực tiếp vào hệ thống hỗ trợ quyết định lâm sàng!")
+
+    st.subheader("Data Marts - Báo cáo & Data Mining")
+    st.markdown("""
+    **Data Marts** là các bảng tổng hợp được tạo từ Data Warehouse để phục vụ:
+    - **Báo cáo và DSS**: `mart_patient_profile`, `mart_time_trend_monthly`
+    - **Data Mining/ML**: `mart_clinical_event_flat`
+    """)
+    
+    if engine is None:
+        st.warning("Chưa kết nối database!")
+    else:
+        mart_tab = st.tabs([
+            "📊 Patient Profile", 
+            "🔬 Clinical Event Flat (ML)", 
+            "📈 Time Trend Monthly",
+            "🔄 Refresh Data Marts"
+        ])
+        
+        # Tab 1: Patient Profile
+        with mart_tab[0]:
+            st.write("### mart_patient_profile - Hồ sơ tổng hợp theo bệnh nhân")
+            st.markdown("""
+            **Mục đích**: 1 hàng / 1 patient - tổng hợp thông tin mô tả + KPI tổng quát
+            - Số lần khám, first/last event
+            - Trung bình cholesterol, huyết áp
+            - Tỷ lệ dương tính (% events có target_num > 0)
+            """)
+            
+            try:
+                # Thống kê tổng quan
+                stats_query = """
+                SELECT 
+                    COUNT(*) as total_patients,
+                    AVG(total_events) as avg_events_per_patient,
+                    AVG(percent_positive) as avg_positive_rate,
+                    AVG(avg_chol) as avg_chol_overall,
+                    AVG(avg_trestbps) as avg_bp_overall
+                FROM heart_dw.mart_patient_profile
+                """
+                stats = pd.read_sql(stats_query, engine)
+                
+                col1, col2, col3, col4, col5 = st.columns(5)
+                with col1:
+                    st.metric("Tổng bệnh nhân", int(stats['total_patients'].iloc[0]))
+                with col2:
+                    st.metric("TB số lần khám", f"{stats['avg_events_per_patient'].iloc[0]:.1f}")
+                with col3:
+                    st.metric("TB tỷ lệ dương tính", f"{stats['avg_positive_rate'].iloc[0]*100:.1f}%")
+                with col4:
+                    st.metric("TB Cholesterol", f"{stats['avg_chol_overall'].iloc[0]:.0f}")
+                with col5:
+                    st.metric("TB Huyết áp", f"{stats['avg_bp_overall'].iloc[0]:.0f}")
+                
+                # Phân tích theo nhóm tuổi
+                age_query = """
+                SELECT 
+                    age_group,
+                    COUNT(*) as patient_count,
+                    AVG(percent_positive) as avg_positive_rate,
+                    AVG(avg_chol) as avg_chol,
+                    AVG(avg_trestbps) as avg_bp
+                FROM heart_dw.mart_patient_profile
+                GROUP BY age_group
+                ORDER BY 
+                    CASE age_group
+                        WHEN '<40' THEN 1
+                        WHEN '40-54' THEN 2
+                        WHEN '55-69' THEN 3
+                        ELSE 4
+                    END
+                """
+                age_data = pd.read_sql(age_query, engine)
+                
+                st.write("#### Phân tích theo nhóm tuổi")
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig1 = px.bar(age_data, x='age_group', y='patient_count',
+                                title="Số lượng bệnh nhân theo nhóm tuổi",
+                                labels={'patient_count': 'Số bệnh nhân', 'age_group': 'Nhóm tuổi'})
+                    st.plotly_chart(fig1, use_container_width=True)
+                
+                with col2:
+                    fig2 = px.bar(age_data, x='age_group', y='avg_positive_rate',
+                                title="Tỷ lệ dương tính trung bình theo nhóm tuổi",
+                                labels={'avg_positive_rate': 'Tỷ lệ dương tính', 'age_group': 'Nhóm tuổi'})
+                    st.plotly_chart(fig2, use_container_width=True)
+                
+                # Top 10 bệnh nhân nguy cơ cao
+                st.write("#### Top 10 bệnh nhân có tỷ lệ dương tính cao nhất")
+                high_risk_query = """
+                SELECT 
+                    unique_id, age, sex, age_group,
+                    total_events, percent_positive,
+                    avg_chol, avg_trestbps, max_oldpeak
+                FROM heart_dw.mart_patient_profile
+                WHERE total_events > 0
+                ORDER BY percent_positive DESC, max_oldpeak DESC
+                LIMIT 10
+                """
+                high_risk = pd.read_sql(high_risk_query, engine)
+                st.dataframe(high_risk, use_container_width=True)
+                
+                # Xem dữ liệu
+                if st.checkbox("Xem toàn bộ dữ liệu mart_patient_profile"):
+                    all_data = pd.read_sql("SELECT * FROM heart_dw.mart_patient_profile LIMIT 100", engine)
+                    st.dataframe(all_data, use_container_width=True)
+                    
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
+                st.info("Vui lòng chạy ETL trước để tạo Data Marts")
+        
+        # Tab 2: Clinical Event Flat (ML)
+        with mart_tab[1]:
+            st.write("### mart_clinical_event_flat - Bảng phẳng cho Data Mining/ML")
+            st.markdown("""
+            **Mục đích**: Bảng phẳng event-level, sẵn sàng cho Data Mining/ML
+            - Chứa đầy đủ biến gốc + derived features (age_bin, chol_cat, bp_stage)
+            - Có thể export trực tiếp để training model
+            """)
+            
+            try:
+                # Thống kê
+                ml_stats_query = """
+                SELECT 
+                    COUNT(*) as total_events,
+                    SUM(CASE WHEN target_num > 0 THEN 1 ELSE 0 END) as positive_events,
+                    ROUND(100.0 * SUM(CASE WHEN target_num > 0 THEN 1 ELSE 0 END)::numeric / COUNT(*), 2) as positive_rate
+                FROM heart_dw.mart_clinical_event_flat
+                """
+                ml_stats = pd.read_sql(ml_stats_query, engine)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Tổng số events", int(ml_stats['total_events'].iloc[0]))
+                with col2:
+                    st.metric("Events dương tính", int(ml_stats['positive_events'].iloc[0]))
+                with col3:
+                    st.metric("Tỷ lệ dương tính", f"{ml_stats['positive_rate'].iloc[0]}%")
+                
+                # Phân tích derived features
+                st.write("#### Phân tích Derived Features")
+                
+                # Age bin distribution
+                age_bin_query = """
+                SELECT 
+                    age_bin,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN target_num > 0 THEN 1 ELSE 0 END) as positive,
+                    ROUND(100.0 * SUM(CASE WHEN target_num > 0 THEN 1 ELSE 0 END)::numeric / COUNT(*), 2) as positive_rate
+                FROM heart_dw.mart_clinical_event_flat
+                GROUP BY age_bin
+                ORDER BY 
+                    CASE age_bin
+                        WHEN '<40' THEN 1
+                        WHEN '40-54' THEN 2
+                        WHEN '55-69' THEN 3
+                        ELSE 4
+                    END
+                """
+                age_bin_data = pd.read_sql(age_bin_query, engine)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig1 = px.bar(age_bin_data, x='age_bin', y='count',
+                                title="Phân bố theo Age Bin",
+                                labels={'count': 'Số events', 'age_bin': 'Nhóm tuổi'})
+                    st.plotly_chart(fig1, use_container_width=True)
+                
+                with col2:
+                    fig2 = px.bar(age_bin_data, x='age_bin', y='positive_rate',
+                                title="Tỷ lệ dương tính theo Age Bin",
+                                labels={'positive_rate': 'Tỷ lệ (%)', 'age_bin': 'Nhóm tuổi'})
+                    st.plotly_chart(fig2, use_container_width=True)
+                
+                # Cholesterol category
+                chol_cat_query = """
+                SELECT 
+                    chol_cat,
+                    COUNT(*) as count,
+                    ROUND(100.0 * SUM(CASE WHEN target_num > 0 THEN 1 ELSE 0 END)::numeric / COUNT(*), 2) as positive_rate
+                FROM heart_dw.mart_clinical_event_flat
+                WHERE chol_cat IS NOT NULL
+                GROUP BY chol_cat
+                ORDER BY 
+                    CASE chol_cat
+                        WHEN 'desirable' THEN 1
+                        WHEN 'borderline_high' THEN 2
+                        ELSE 3
+                    END
+                """
+                chol_cat_data = pd.read_sql(chol_cat_query, engine)
+                
+                fig3 = px.pie(chol_cat_data, values='count', names='chol_cat',
+                            title="Phân bố theo Cholesterol Category")
+                st.plotly_chart(fig3, use_container_width=True)
+                
+                # BP Stage
+                bp_stage_query = """
+                SELECT 
+                    bp_stage,
+                    COUNT(*) as count,
+                    ROUND(100.0 * SUM(CASE WHEN target_num > 0 THEN 1 ELSE 0 END)::numeric / COUNT(*), 2) as positive_rate
+                FROM heart_dw.mart_clinical_event_flat
+                WHERE bp_stage IS NOT NULL
+                GROUP BY bp_stage
+                ORDER BY 
+                    CASE bp_stage
+                        WHEN 'normal' THEN 1
+                        WHEN 'elevated' THEN 2
+                        WHEN 'stage1' THEN 3
+                        WHEN 'stage2' THEN 4
+                        ELSE 5
+                    END
+                """
+                bp_stage_data = pd.read_sql(bp_stage_query, engine)
+                
+                fig4 = px.bar(bp_stage_data, x='bp_stage', y='positive_rate',
+                            title="Tỷ lệ dương tính theo BP Stage",
+                            labels={'positive_rate': 'Tỷ lệ (%)', 'bp_stage': 'Giai đoạn huyết áp'})
+                st.plotly_chart(fig4, use_container_width=True)
+                
+                # Export cho ML
+                st.write("#### Export dữ liệu cho ML")
+                if st.button("📥 Tải xuống dữ liệu cho ML"):
+                    ml_data = pd.read_sql("SELECT * FROM heart_dw.mart_clinical_event_flat", engine)
+                    csv = ml_data.to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name="mart_clinical_event_flat.csv",
+                        mime="text/csv"
+                    )
+                    st.success(f"Đã tải {len(ml_data)} dòng dữ liệu")
+                
+                # Xem mẫu dữ liệu
+                if st.checkbox("Xem mẫu dữ liệu (100 dòng đầu)"):
+                    sample = pd.read_sql("SELECT * FROM heart_dw.mart_clinical_event_flat LIMIT 100", engine)
+                    st.dataframe(sample, use_container_width=True)
+                    
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
+                st.info("Vui lòng chạy ETL trước để tạo Data Marts")
+        
+        # Tab 3: Time Trend Monthly
+        with mart_tab[2]:
+            st.write("### mart_time_trend_monthly - Xu hướng theo tháng")
+            st.markdown("""
+            **Mục đích**: Chỉ số tổng hợp theo tháng cho dashboard và DSS
+            - Tổng số ca, tỷ lệ dương tính
+            - Trung bình cholesterol, huyết áp, tuổi theo tháng
+            """)
+            
+            try:
+                # Time series visualization
+                time_data = pd.read_sql("SELECT * FROM heart_dw.mart_time_trend_monthly ORDER BY year, month", engine)
+                
+                if len(time_data) > 0:
+                    time_data['period'] = pd.to_datetime(time_data['period'])
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Tổng số tháng", len(time_data))
+                    with col2:
+                        st.metric("TB events/tháng", f"{time_data['total_events'].mean():.0f}")
+                    with col3:
+                        st.metric("TB tỷ lệ dương tính", f"{time_data['incidence_rate'].mean()*100:.1f}%")
+                    with col4:
+                        st.metric("TB Cholesterol", f"{time_data['avg_chol'].mean():.0f}")
+                    
+                    # Line charts
+                    st.write("#### Xu hướng theo thời gian")
+                    
+                    fig1 = px.line(time_data, x='period', y='incidence_rate',
+                                 title="Tỷ lệ dương tính theo tháng (%)",
+                                 markers=True,
+                                 labels={'incidence_rate': 'Tỷ lệ dương tính (%)', 'period': 'Thời gian'})
+                    st.plotly_chart(fig1, use_container_width=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fig2 = px.line(time_data, x='period', y='total_events',
+                                     title="Tổng số events theo tháng",
+                                     markers=True)
+                        st.plotly_chart(fig2, use_container_width=True)
+                    
+                    with col2:
+                        fig3 = px.line(time_data, x='period', y='avg_chol',
+                                     title="Cholesterol trung bình theo tháng",
+                                     markers=True)
+                        st.plotly_chart(fig3, use_container_width=True)
+                    
+                    # Heatmap theo tháng
+                    time_data['year_month'] = time_data['year'].astype(str) + '-' + time_data['month'].astype(str).str.zfill(2)
+                    pivot_heatmap = time_data.pivot_table(
+                        index='year',
+                        columns='month',
+                        values='incidence_rate',
+                        aggfunc='mean'
+                    )
+                    
+                    fig4 = px.imshow(pivot_heatmap,
+                                   title="Heatmap: Tỷ lệ dương tính theo năm và tháng",
+                                   labels=dict(x="Tháng", y="Năm", color="Tỷ lệ (%)"),
+                                   aspect="auto", text_auto=True)
+                    st.plotly_chart(fig4, use_container_width=True)
+                    
+                    # Data table
+                    st.write("#### Dữ liệu chi tiết")
+                    st.dataframe(time_data, use_container_width=True)
+                else:
+                    st.info("Chưa có dữ liệu thời gian")
+                    
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
+                st.info("Vui lòng chạy ETL trước để tạo Data Marts")
+        
+
 st.caption("© 2025 - Assignment Data Warehouse & Decision Support Systems")

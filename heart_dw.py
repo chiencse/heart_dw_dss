@@ -15,7 +15,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import  roc_auc_score, accuracy_score
+from sklearn.metrics import (roc_auc_score, accuracy_score, confusion_matrix, 
+                             precision_score, recall_score, f1_score, classification_report)
 import warnings
 import kagglehub
 warnings.filterwarnings('ignore')
@@ -172,6 +173,8 @@ if train_model:
     }
     
     results = []
+    model_predictions = {}  # Lưu predictions để vẽ confusion matrix
+    
     st.write("### Kết quả huấn luyện các mô hình")
     
     progress_bar = st.progress(0)
@@ -180,22 +183,101 @@ if train_model:
         y_pred = model.predict(X_test)
         y_prob = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
         
+        # Tính các metric
         acc = accuracy_score(y_test, y_pred)
         auc = roc_auc_score(y_test, y_prob) if y_prob is not None else None
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall = recall_score(y_test, y_pred, zero_division=0)
+        f1 = f1_score(y_test, y_pred, zero_division=0)
+        cm = confusion_matrix(y_test, y_pred)
         
+        # Lưu kết quả
         results.append({
             "Model": name,
             "Accuracy": round(acc, 4),
+            "Precision": round(precision, 4),
+            "Recall": round(recall, 4),
+            "F1-Score": round(f1, 4),
             "AUC": round(auc, 4) if auc else "N/A"
         })
+        
+        # Lưu predictions và confusion matrix
+        model_predictions[name] = {
+            'y_test': y_test,
+            'y_pred': y_pred,
+            'cm': cm
+        }
+        
         progress_bar.progress((i + 1) / len(models))
     
     results_df = pd.DataFrame(results).sort_values("Accuracy", ascending=False)
-    st.dataframe(results_df.style.highlight_max(axis=0), use_container_width=True)
     
-    # Biểu đồ so sánh
-    fig = px.bar(results_df, x='Model', y='Accuracy', title="So sánh độ chính xác các mô hình")
-    st.plotly_chart(fig, use_container_width=True)
+    # Hiển thị bảng kết quả với highlight
+    st.write("#### Bảng so sánh các metric")
+    st.dataframe(results_df.style.highlight_max(axis=0, subset=['Accuracy', 'Precision', 'Recall', 'F1-Score']), 
+                 use_container_width=True)
+    
+    # Biểu đồ so sánh các metric
+    st.write("#### Biểu đồ so sánh các metric")
+    metric_cols = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+    fig_comparison = px.bar(
+        results_df.melt(id_vars=['Model'], value_vars=metric_cols, 
+                        var_name='Metric', value_name='Score'),
+        x='Model', y='Score', color='Metric',
+        title="So sánh các metric đánh giá mô hình",
+        barmode='group',
+        labels={'Score': 'Điểm số', 'Model': 'Mô hình'}
+    )
+    st.plotly_chart(fig_comparison, use_container_width=True)
+    
+    # Hiển thị Confusion Matrix cho từng mô hình
+    st.write("#### Confusion Matrix cho từng mô hình")
+    cols = st.columns(len(models))
+    
+    for idx, (name, pred_data) in enumerate(model_predictions.items()):
+        with cols[idx]:
+            st.write(f"**{name}**")
+            cm = pred_data['cm']
+            
+            # Vẽ confusion matrix bằng seaborn
+            fig_cm, ax = plt.subplots(figsize=(5, 4))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+                       xticklabels=['Không bệnh', 'Có bệnh'],
+                       yticklabels=['Không bệnh', 'Có bệnh'])
+            ax.set_xlabel('Dự đoán')
+            ax.set_ylabel('Thực tế')
+            ax.set_title(f'Confusion Matrix - {name}')
+            st.pyplot(fig_cm)
+            
+            # Hiển thị số liệu chi tiết
+            tn, fp, fn, tp = cm.ravel()
+            st.caption(f"TN: {tn} | FP: {fp} | FN: {fn} | TP: {tp}")
+    
+    # Classification Report chi tiết
+    st.write("#### Classification Report chi tiết")
+    report_tabs = st.tabs([name for name in models.keys()])
+    
+    for idx, (name, pred_data) in enumerate(model_predictions.items()):
+        with report_tabs[idx]:
+            st.write(f"**{name}**")
+            report = classification_report(
+                pred_data['y_test'], 
+                pred_data['y_pred'],
+                target_names=['Không bệnh', 'Có bệnh'],
+                output_dict=True
+            )
+            
+            # Hiển thị dạng bảng
+            report_df = pd.DataFrame(report).transpose()
+            st.dataframe(report_df, use_container_width=True)
+            
+            # Hiển thị dạng text
+            with st.expander("Xem dạng text"):
+                st.text(classification_report(
+                    pred_data['y_test'], 
+                    pred_data['y_pred'],
+                    target_names=['Không bệnh', 'Có bệnh']
+                ))
 
 # ==================== DỰ ĐOÁN MỚI ====================
 st.sidebar.header("5. Dự đoán bệnh tim cho bệnh nhân mới")
